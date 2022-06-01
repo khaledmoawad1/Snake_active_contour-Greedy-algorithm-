@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed May 18 12:58:53 2022
+
+@author: nu
+"""
+#Importing Libraries
+import numpy as np
+import cv2 
+import math 
+#%%
+# Gradient function
+def Get_Gradient(image):
+    gray = cv2.cvtColor( image, cv2.COLOR_BGR2GRAY )
+    blur = cv2.GaussianBlur(gray,(7,7),2)
+    gradient_X = cv2.Sobel( blur, cv2.CV_64F, 1, 0, ksize=3 )
+    gradient_Y = cv2.Sobel( blur, cv2.CV_64F, 0, 1, ksize=3 )
+    grad = (gradient_X **2 + gradient_Y **2)**0.5
+    return grad
+
+#%%
+# Getting matrix of neighbors
+def getNeighborsMatrix(image, point, ksize=3):
+    ksize = 3
+    nsize = int(ksize/2)
+    neighbors = []
+    borns = image.shape
+    for i in range(point[0]-nsize, point[0]+nsize+1):
+        for j in range(point[1]-nsize, point[1]+nsize+1):
+            if i == point[0] and j == point[1]:
+                continue
+            if i >= 0 and i < borns[0]:
+                x = i                            
+            elif i >= borns[0]:
+                continue
+            elif i < 0:
+                continue
+            if j >= 0 and j < borns[1]:
+                y = j
+            elif j >= borns[0]:
+                continue
+            elif j < 0:
+                continue
+            neighbors.append((x, y))
+    neighbors.append(point)
+
+    return neighbors
+
+#%%
+def avg_distance(P_cord):
+    d = 0
+    for i in range(len(P_cord)):
+        d += math.sqrt((P_cord[i][0]-P_cord[(i+1)%len(P_cord)][0])**2 + (P_cord[i][1]-P_cord[(i+1)%len(P_cord)][1])**2)
+            
+    avg_distance = d/len(P_cord)
+    
+    return avg_distance
+#%%
+# First term (Continuity)
+def cont_energy (before,n, avg_distance, alpha):
+    before = np.array(before)
+    n = np.array(n)
+    E_per_p_cont = alpha *(avg_distance-(np.linalg.norm(before-n)))**2  
+    return E_per_p_cont
+#%%
+# Second Term (Curvature)
+def curv_energy(before,after,n, beta):
+    after = np.array(after)
+    before = np.array(before)
+    n = np.array(n)
+    E_per_p_curv = beta*(np.linalg.norm(before - 2*n + after))**2
+    
+    return E_per_p_curv 
+        
+#%%
+
+def Snake (P_cord, image):
+    alpha = 0.1
+    beta = 0.1
+    avg_d = avg_distance(P_cord)
+    grad = Get_Gradient(image)
+    
+    cv2.imshow("grad",grad)
+    for i in range (len(P_cord)):
+        n = getNeighborsMatrix(image, P_cord[i],ksize=3)
+        Total_Energy = []
+        
+        for j in range(len(n)):
+            Eimg = -1* grad[n[j][0], n[j][1]]
+            Econt = cont_energy(P_cord[i-1],n[j], avg_d, alpha)
+            Ecurv = curv_energy(P_cord[i-1],P_cord[(i+1)%len(P_cord)],n[j], beta)
+            Energy = Econt + Ecurv + Eimg
+            Total_Energy.append(Energy)
+        
+        if len(n) !=0:
+            min_E_P = min(Total_Energy)
+            ind = Total_Energy.index(min_E_P)
+            P_cord[i] = n[ind] 
+           
+    return P_cord
+
+
+        
+#%%
+points = []
+
+def click(event, x, y, flags, param):
+	
+	global points
+	# if the left mouse button was clicked, record the starting
+	# (x, y) coordinates
+	if event == cv2.EVENT_LBUTTONDOWN:
+		points.append([y,x])
+        
+
+image = cv2.imread("image2.png")
+  
+cv2.namedWindow("image")
+cv2.setMouseCallback("image", click)
+
+# keep looping until the 'q' key is pressed
+while True:
+	# display the image and wait for a keypress
+	cv2.imshow("image", image)
+	key = cv2.waitKey(1) & 0xFF
+    # close after only 2 clicks
+	if len(points) > 1: print(points); break;
+	# if the 'c' key is pressed, break from the loop
+	elif key == ord("q"):
+		break
+
+
+
+
+# getting coordinates of the center and the point
+center, p1 = points[0], points[1]
+c, p1 = np.array(center), np.array(p1)
+# Calculating the radius
+r = np.linalg.norm(p1-c)
+r = int(r)+1
+
+# image = cv2.imread("image1.jpeg")
+i,j = center
+image2= cv2.circle(image.copy(), (j,i), r, (0, 0, 0), 2)
+cv2.imshow('initial_contour', image2)
+
+# number of points we want to work with
+num_p = 500
+
+x0, y0 = center[0], center[1]
+x = []
+y = []
+step_angel = 0
+step_angel_0 = np.deg2rad(360/num_p)
+
+for i in range(num_p):
+    
+    xi = x0 + r * math.cos(step_angel)
+    yi = y0 + r * math.sin(step_angel)
+    x.append(int(xi))
+    y.append(int(yi))
+    step_angel += step_angel_0
+
+    
+# the coordinates of points on the initial contour   
+P_cord = list(zip(x,y)) 
+
+# Drawing these points on the initial contour
+for i in range(num_p):
+    x,y = P_cord[i]
+    image2 = cv2.circle(image2, (y,x), 3, (0, 0, 255), -1)
+cv2.imshow("initial_contour with points", image2)
+cv2.waitKey()
+cv2.destroyAllWindows()
+
+#%%
+# Main Function
+num_iters = 200
+for _ in range (num_iters):
+    P_cord = Snake(P_cord, image)
+    img = image.copy()
+    for i in range (len(P_cord)):
+        x,y = P_cord[i]
+        img = cv2.circle(img,(y,x), 7, (0, 0, 255), -1)
+         
+    cv2.imshow('Result', img)
+    cv2.waitKey(20)   
+cv2.waitKey()
+cv2.destroyAllWindows() 
+
+    
+
+
+
+
+
+
+
+
+
+
+         
